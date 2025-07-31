@@ -14,7 +14,7 @@ langfuse = Langfuse(
 )
 
 # --- Wczytanie modelu ---
-MODEL_NAME = 'model_polmaraton'
+MODEL_NAME = 'model_polmaraton.pkl'
 
 @st.cache_data
 def get_model():
