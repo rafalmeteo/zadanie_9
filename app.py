@@ -2,17 +2,16 @@ import streamlit as st
 import pandas as pd
 import datetime
 import json
-from dotenv import load_dotenv
 import os
 from pycaret.regression import load_model, predict_model
 from openai import OpenAI
 from langfuse import Langfuse
 
-# --- Załaduj dane z .env ---
-load_dotenv()
-
-# --- Inicjalizacja Langfuse z .env ---
-langfuse = Langfuse()
+# --- Inicjalizacja Langfuse z secrets ---
+langfuse = Langfuse(
+    public_key=st.secrets["LANGFUSE_PUBLIC_KEY"],
+    secret_key=st.secrets["LANGFUSE_SECRET_KEY"]
+)
 
 # --- Wczytanie modelu ---
 MODEL_NAME = 'model_polmaraton'
@@ -106,7 +105,6 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
             "sekundy": seconds
         }
         
-
         st.success(f"✅ Przewidywany czas ukończenia biegu: {time_str}")
 
     except Exception as e:
@@ -114,7 +112,3 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
         trace.status = "error"
         trace.end()
         st.error(f"❌ Błąd główny: {str(e)}")
-
-
-
-
