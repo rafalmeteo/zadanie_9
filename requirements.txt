@@ -4,3 +4,5 @@ scikit-learn==1.0.2
 openai
 langfuse
 pycaret==2.3.10
+lightgbm==3.3.2
+numpy==1.21.6
