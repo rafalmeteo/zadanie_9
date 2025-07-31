@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import datetime
 import json
-import os
 from pycaret.regression import load_model, predict_model
 from openai import OpenAI
 from langfuse import Langfuse
@@ -10,7 +9,8 @@ from langfuse import Langfuse
 # --- Inicjalizacja Langfuse z secrets ---
 langfuse = Langfuse(
     public_key=st.secrets["LANGFUSE_PUBLIC_KEY"],
-    secret_key=st.secrets["LANGFUSE_SECRET_KEY"]
+    secret_key=st.secrets["LANGFUSE_SECRET_KEY"],
+    host=st.secrets.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
 )
 
 # --- Wczytanie modelu ---
@@ -25,23 +25,27 @@ model = get_model()
 # --- UI ---
 st.title("🏃‍♂️ Przewidywanie czasu półmaratonu")
 
+# --- Klucz OpenAI ---
 if "openai_key" not in st.session_state:
     st.session_state["openai_key"] = ""
 
 openai_key = st.text_input("🔑 Wprowadź klucz OpenAI API:", type="password", value=st.session_state["openai_key"])
+st.session_state["openai_key"] = openai_key
+
 if not openai_key:
-    st.warning("⚠️ Wprowadź klucz API.")
+    st.warning("⚠️ Wprowadź klucz OpenAI API, aby kontynuować.")
     st.stop()
 
-st.session_state["openai_key"] = openai_key
 client = OpenAI(api_key=openai_key)
 
+# --- Dane użytkownika ---
 model_choice = st.selectbox("🤖 Wybierz model:", ["gpt-3.5-turbo", "gpt-4", "gpt-4o"])
-input_text = st.text_area("📝 Opisz siebie:", height=150)
+input_text = st.text_area("📝 Opisz siebie (wiek, płeć, doświadczenie biegowe):", height=150)
 
 if st.button("🔮 Oblicz przewidywany czas") and input_text:
     trace = langfuse.trace(name="polmaraton", input={"opis": input_text})
     try:
+        # --- Prompt do LLM ---
         prompt = f"""
         Na podstawie opisu użytkownika zwróć dane w formacie JSON:
         - Płeć (M lub K)
@@ -55,7 +59,6 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
         Zwróć wyłącznie poprawny JSON.
         """
 
-        # --- Generowanie JSON ---
         span1 = trace.span(name="generowanie-jsona", input={"prompt": prompt})
         response = client.chat.completions.create(
             model=model_choice,
@@ -65,16 +68,20 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
             ],
             temperature=0.2
         )
+
         raw_output = response.choices[0].message.content.strip()
+
+        # --- Czyszczenie odpowiedzi z ```json ... ```
+        if raw_output.startswith("```json"):
+            raw_output = raw_output.replace("```json", "").replace("```", "").strip()
+
         span1.output = raw_output
         span1.status = "success"
         span1.end()
 
         st.text_area("🧪 Odpowiedź modelu:", value=raw_output, height=200)
 
-        if raw_output.startswith("```json"):
-            raw_output = raw_output.replace("```json", "").replace("```", "").strip()
-
+        # --- Parsowanie JSON ---
         parsed = json.loads(raw_output)
         df_user = pd.DataFrame([parsed])
         st.subheader("📋 Dane wejściowe")
@@ -85,16 +92,11 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
         prediction = predict_model(model, data=df_user)
 
         if "prediction_label" not in prediction.columns:
-            span2.output = {"błąd": "Brak prediction_label"}
-            span2.status = "error"
-            span2.end()
-            trace.output = {"błąd": "Brak prediction_label"}
-       
-            st.error("❌ Brak kolumny 'prediction_label'.")
-            st.stop()
+            raise ValueError("Brak kolumny 'prediction_label' w wyniku predykcji.")
 
         seconds = prediction["prediction_label"].iloc[0]
         time_str = str(datetime.timedelta(seconds=int(seconds)))
+
         span2.output = {"czas": time_str, "sekundy": seconds}
         span2.status = "success"
         span2.end()
@@ -104,11 +106,11 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
             "czas": time_str,
             "sekundy": seconds
         }
-        
+
         st.success(f"✅ Przewidywany czas ukończenia biegu: {time_str}")
 
     except Exception as e:
         trace.output = {"błąd": str(e)}
         trace.status = "error"
         trace.end()
-        st.error(f"❌ Błąd główny: {str(e)}")
+        st.error(f"❌ Błąd: {str(e)}")
