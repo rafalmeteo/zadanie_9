@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 import json
-from pycaret.regression import load_model, predict_model
+import joblib
+
 from openai import OpenAI
 from langfuse import Langfuse
 
@@ -18,7 +19,7 @@ MODEL_NAME = 'model_polmaraton.pkl'
 
 @st.cache_data
 def get_model():
-    return load_model(MODEL_NAME)
+    return joblib.load(MODEL_NAME)
 
 model = get_model()
 
@@ -59,6 +60,7 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
         Zwróć wyłącznie poprawny JSON.
         """
 
+        # --- Generowanie JSON przez LLM ---
         span1 = trace.span(name="generowanie-jsona", input={"prompt": prompt})
         response = client.chat.completions.create(
             model=model_choice,
@@ -71,7 +73,6 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
 
         raw_output = response.choices[0].message.content.strip()
 
-        # --- Czyszczenie odpowiedzi z ```json ... ```
         if raw_output.startswith("```json"):
             raw_output = raw_output.replace("```json", "").replace("```", "").strip()
 
@@ -81,20 +82,21 @@ if st.button("🔮 Oblicz przewidywany czas") and input_text:
 
         st.text_area("🧪 Odpowiedź modelu:", value=raw_output, height=200)
 
-        # --- Parsowanie JSON ---
+        # --- Parsowanie odpowiedzi do DataFrame ---
         parsed = json.loads(raw_output)
         df_user = pd.DataFrame([parsed])
+
         st.subheader("📋 Dane wejściowe")
         st.write(df_user)
 
         # --- Predykcja ---
         span2 = trace.span(name="predykcja", input=parsed)
-        prediction = predict_model(model, data=df_user)
+        prediction = model.predict(df_user)
 
-        if "prediction_label" not in prediction.columns:
-            raise ValueError("Brak kolumny 'prediction_label' w wyniku predykcji.")
+        if len(prediction) == 0:
+            raise ValueError("Model nie zwrócił żadnej predykcji.")
 
-        seconds = prediction["prediction_label"].iloc[0]
+        seconds = prediction[0]
         time_str = str(datetime.timedelta(seconds=int(seconds)))
 
         span2.output = {"czas": time_str, "sekundy": seconds}
